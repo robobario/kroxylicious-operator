@@ -29,6 +29,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -120,6 +121,51 @@ var _ = Describe("KroxyliciousProxy controller", func() {
 
 			Expect(createdConfigMap.Data).Should(Equal(map[string]string{"hello": "world"}))
 
+			By("By creating a new Kroxylicious Deployment")
+
+			deploymentLookupKey := types.NamespacedName{Name: KroxyliciousProxyName, Namespace: KroxyliciousProxyNamespace}
+			createdDeployment := &appsv1.Deployment{}
+
+			// We'll need to retry getting this newly created CronJob, given that creation may not immediately happen.
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, deploymentLookupKey, createdDeployment)
+				if err != nil {
+					return false
+				}
+				return true
+			}, timeout, interval).Should(BeTrue())
+
+			expectedLabels := map[string]string{"app": "kroxylicious"}
+			deploymentMetadata := createdDeployment.ObjectMeta
+			Expect(deploymentMetadata.Labels).Should(Equal(expectedLabels))
+
+			spec := createdDeployment.Spec
+			var expectedReplicas int32 = 1
+			Expect(*spec.Replicas).Should(Equal(expectedReplicas))
+			Expect(spec.Selector.MatchLabels).Should(Equal(expectedLabels))
+			template := spec.Template
+			Expect(template.ObjectMeta.Labels).Should(Equal(expectedLabels))
+			Expect(template.Spec.Containers).Should(HaveLen(1))
+			container := template.Spec.Containers[0]
+			Expect(container.Name).Should(Equal("kroxylicious"))
+			Expect(container.Image).Should(Equal("quay.io/kroxylicious/kroxylicious-development:0.3.0-SNAPSHOT"))
+			Expect(container.Args).Should(Equal([]string{"--config", "/opt/kroxylicious/config/config.yaml"}))
+			Expect(container.Ports).Should(HaveLen(5))
+			Expect(container.Ports[0].ContainerPort).Should(Equal(int32(9193)))
+			Expect(container.Ports[1].ContainerPort).Should(Equal(int32(9292)))
+			Expect(container.Ports[2].ContainerPort).Should(Equal(int32(9293)))
+			Expect(container.Ports[3].ContainerPort).Should(Equal(int32(9294)))
+			Expect(container.Ports[4].ContainerPort).Should(Equal(int32(9295)))
+			Expect(container.VolumeMounts).Should(HaveLen(1))
+			mount := container.VolumeMounts[0]
+			Expect(mount.Name).Should(Equal("config-volume"))
+			Expect(mount.MountPath).Should(Equal("/opt/kroxylicious/config/config.yaml"))
+			Expect(mount.SubPath).Should(Equal("config.yaml"))
+
+			Expect(template.Spec.Volumes).Should(HaveLen(1))
+			volume := template.Spec.Volumes[0]
+			Expect(volume.Name).Should(Equal("config-volume"))
+			Expect(volume.ConfigMap.Name).Should(Equal(KroxyliciousProxyName))
 		})
 	})
 

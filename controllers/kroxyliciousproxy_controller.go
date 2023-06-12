@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -82,7 +83,7 @@ func (r *KroxyliciousProxyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		logger.Info("configMap not found")
 		configMap, err := r.configMapForKroxylicious(kroxyliciousProxy)
 		if err != nil {
-			logger.Error(err, "Failed to define new ConfigMap resource for Memcached")
+			logger.Error(err, "Failed to define new ConfigMap resource for KroxyliciousProxy")
 
 			// The following implementation will update the status
 			meta.SetStatusCondition(&kroxyliciousProxy.Status.Conditions, metav1.Condition{Type: typeAvailable,
@@ -104,7 +105,41 @@ func (r *KroxyliciousProxyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 				"ConfigMap.Namespace", configMap.Namespace, "Deployment.Name", configMap.Name)
 			return ctrl.Result{}, err
 		} else if err != nil {
-			logger.Error(err, "Failed to get ConfigMap")
+			logger.Error(err, "Failed to create ConfigMap")
+			// Let's return the error for the reconciliation be re-trigged again
+			return ctrl.Result{}, err
+		}
+	}
+
+	foundDeployment := &appsv1.Deployment{}
+	err = r.Get(ctx, types.NamespacedName{Name: kroxyliciousProxy.Name, Namespace: kroxyliciousProxy.Namespace}, foundDeployment)
+	if err != nil && apierrors.IsNotFound(err) {
+		logger.Info("Deployment not found")
+		deployment, err := r.deploymentForKroxylicious(kroxyliciousProxy)
+		if err != nil {
+			logger.Error(err, "Failed to define new Deployment resource for KroxyliciousProxy")
+
+			// The following implementation will update the status
+			meta.SetStatusCondition(&kroxyliciousProxy.Status.Conditions, metav1.Condition{Type: typeAvailable,
+				Status: metav1.ConditionFalse, Reason: "Reconciling",
+				Message: fmt.Sprintf("Failed to create Deployment for the custom resource (%s): (%s)", kroxyliciousProxy.Name, err)})
+
+			if err := r.Status().Update(ctx, kroxyliciousProxy); err != nil {
+				logger.Error(err, "Failed to update Kroxylicious status")
+				return ctrl.Result{}, err
+			}
+
+			return ctrl.Result{}, err
+		}
+
+		logger.Info("Creating a new Deployment",
+			"Deployment.Namespace", deployment.Namespace, "Deployment.Name", deployment.Name)
+		if err = r.Create(ctx, deployment); err != nil {
+			logger.Error(err, "Failed to create new Deployment",
+				"Deployment.Namespace", deployment.Namespace, "Deployment.Name", deployment.Name)
+			return ctrl.Result{}, err
+		} else if err != nil {
+			logger.Error(err, "Failed to create Deployment")
 			// Let's return the error for the reconciliation be re-trigged again
 			return ctrl.Result{}, err
 		}
@@ -122,6 +157,67 @@ func (r *KroxyliciousProxyReconciler) configMapForKroxylicious(
 		Data: map[string]string{"hello": "world"},
 	}
 	return configmap, nil
+}
+
+func (r *KroxyliciousProxyReconciler) deploymentForKroxylicious(
+	kroxylicious *proxyv1alpha1.KroxyliciousProxy) (*appsv1.Deployment, error) {
+	labels := map[string]string{"app": "kroxylicious"}
+	var startPort int32 = 9292
+	var ports []corev1.ContainerPort
+	ports = append(ports, corev1.ContainerPort{ContainerPort: 9193})
+	for i := 0; i <= kroxylicious.Spec.MaxBrokers; i++ {
+		ports = append(ports, corev1.ContainerPort{ContainerPort: startPort + int32(i)})
+	}
+	var replicas int32 = 1
+	const configVolume = "config-volume"
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      kroxylicious.Name,
+			Namespace: kroxylicious.Namespace,
+			Labels:    labels,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: labels,
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "kroxylicious",
+							Image: "quay.io/kroxylicious/kroxylicious-development:0.3.0-SNAPSHOT",
+							Args:  []string{"--config", "/opt/kroxylicious/config/config.yaml"},
+							Ports: ports,
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      configVolume,
+									MountPath: "/opt/kroxylicious/config/config.yaml",
+									SubPath:   "config.yaml",
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: configVolume,
+							VolumeSource: corev1.VolumeSource{
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: kroxylicious.Name,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	return deployment, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
