@@ -1,0 +1,7 @@
+apiVersion: proxy.kroxylicious.io/v1alpha1
+kind: KroxyliciousProxy
+metadata:
+  name: kroxylicious-example
+spec:
+  target_bootstrap_server: my-kafka-broker:9092
+  max_brokers: 3
