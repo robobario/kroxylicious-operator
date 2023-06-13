@@ -43,9 +43,13 @@ const (
 	kroxyliciousConfigPath     = "/opt/kroxylicious/config/" + kroxyliciousConfigFilename
 )
 
-type ClusterNetworkAddressConfigProvider struct {
+type PortPerBrokerConfig struct {
 	BoostrapAddress      string `json:"bootstrapAddress"`
 	BrokerAddressPattern string `json:"brokerAddressPattern"`
+}
+type ClusterNetworkAddressConfigProvider struct {
+	Type                string              `json:"type"`
+	PortPerBrokerConfig PortPerBrokerConfig `json:"config"`
 }
 
 type TargetCluster struct {
@@ -240,8 +244,11 @@ func (r *KroxyliciousProxyReconciler) configMapForKroxylicious(
 					BootstrapServers: kroxylicious.Spec.TargetBootstrapServer,
 				},
 				ClusterNetworkAddressConfigProvider: ClusterNetworkAddressConfigProvider{
-					BoostrapAddress:      "localhost:9292",
-					BrokerAddressPattern: kroxylicious.Name + "-service:$(portNumber)",
+					Type: "PortPerBroker",
+					PortPerBrokerConfig: PortPerBrokerConfig{
+						BoostrapAddress:      "localhost:9292",
+						BrokerAddressPattern: kroxylicious.Name + ":$(portNumber)",
+					},
 				},
 				LogNetwork: false,
 				LogFrames:  false,

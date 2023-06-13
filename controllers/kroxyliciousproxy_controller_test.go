@@ -112,8 +112,9 @@ var _ = Describe("KroxyliciousProxy controller", func() {
 			Expect(demoCluster.LogFrames).Should(BeFalse())
 			Expect(demoCluster.LogNetwork).Should(BeFalse())
 			Expect(targetCluster.BootstrapServers).Should(Equal(proxiedBootstrapServers))
-			Expect(demoCluster.ClusterNetworkAddressConfigProvider.BoostrapAddress).Should(Equal("localhost:9292"))
-			Expect(demoCluster.ClusterNetworkAddressConfigProvider.BrokerAddressPattern).Should(Equal(KroxyliciousProxyName + "-service:$(portNumber)"))
+			Expect(demoCluster.ClusterNetworkAddressConfigProvider.Type).Should(Equal("PortPerBroker"))
+			Expect(demoCluster.ClusterNetworkAddressConfigProvider.PortPerBrokerConfig.BoostrapAddress).Should(Equal("localhost:9292"))
+			Expect(demoCluster.ClusterNetworkAddressConfigProvider.PortPerBrokerConfig.BrokerAddressPattern).Should(Equal(KroxyliciousProxyName + ":$(portNumber)"))
 
 			Expect(createdConfigMap.Data).Should(HaveKey("config.yaml"))
 

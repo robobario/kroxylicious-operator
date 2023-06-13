@@ -1,30 +1,39 @@
 # kroxylicious-operator
-// TODO(user): Add simple overview of use/purpose
+An operator to deploy and expose the kroxylicious kafka proxy on kubernetes
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+### Running on minikube
 
-## Getting Started
-You’ll need a Kubernetes cluster to run against. You can use [KIND](https://sigs.k8s.io/kind) to get a local cluster for testing, or run against a remote cluster.
-**Note:** Your controller will automatically use the current context in your kubeconfig file (i.e. whatever cluster `kubectl cluster-info` shows).
-
-### Running on the cluster
-1. Install Instances of Custom Resources:
+Prerequisites:
+- minikube
+- a quay.io account
+- a public kroxylicious-operator repository in your quay.io account
+- a public kroxylicious-controller repository in your quay.io account
 
 ```sh
-kubectl apply -f config/samples/
+make docker-build docker-push IMG=quay.io/${quay_username}/kroxylicious-controller:latest
+make deploy IMG=quay.io/${quay_username}/kroxylicious-controller:latest
 ```
 
-2. Build and push your image to the location specified by `IMG`:
-
+Install a strimzi Kafka cluster:
 ```sh
-make docker-build docker-push IMG=<some-registry>/kroxylicious-operator:tag
+kubectl create namespace kafka
+kubectl create -f 'https://strimzi.io/install/latest?namespace=kafka' -n kafka
+kubectl apply -f https://strimzi.io/examples/latest/kafka/kafka-persistent-single.yaml -n kafka
+kubectl wait kafka/my-cluster --for=condition=Ready --timeout=300s -n kafka 
 ```
 
-3. Deploy the controller to the cluster with the image specified by `IMG`:
-
+Install a kroxylicious proxy:
 ```sh
-make deploy IMG=<some-registry>/kroxylicious-operator:tag
+kubectl apply -n kafka -f sample/sample-kroxy.yaml
+```
+
+Wait for the `kroxylicious-example-*` pod to be created
+
+Produce/consume messages:
+```sh
+kubectl -n kafka run kafka-producer -ti --image=quay.io/strimzi/kafka:0.35.1-kafka-3.4.0 --rm=true --restart=Never -- bin/kafka-console-producer.sh --bootstrap-server kroxylicious-example:9292 --topic my-topic
+
+kubectl -n kafka run kafka-consumer -ti --image=quay.io/strimzi/kafka:0.35.1-kafka-3.4.0 --rm=true --restart=Never -- bin/kafka-console-consumer.sh --bootstrap-server my-cluster-kafka-bootstrap:9092 --topic my-topic --from-beginning
 ```
 
 ### Uninstall CRDs
@@ -40,9 +49,6 @@ UnDeploy the controller from the cluster:
 ```sh
 make undeploy
 ```
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
 
 ### How it works
 This project aims to follow the Kubernetes [Operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/).
