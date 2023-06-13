@@ -33,6 +33,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/yaml"
 
 	kroxyliciousv1 "github.com/robobario/kroxylicious-operator/api/v1alpha1"
 )
@@ -63,6 +64,7 @@ var _ = Describe("KroxyliciousProxy controller", func() {
 		It("Should configure Kroxylicious", func() {
 			By("By accepting a new KroxyliciousProxy")
 			ctx := context.Background()
+			const proxiedBootstrapServers = "my-kafka-service:9092"
 			cronJob := &kroxyliciousv1.KroxyliciousProxy{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: "proxy.kroxylicious.io/v1alpha1",
@@ -73,7 +75,7 @@ var _ = Describe("KroxyliciousProxy controller", func() {
 					Namespace: KroxyliciousProxyNamespace,
 				},
 				Spec: kroxyliciousv1.KroxyliciousProxySpec{
-					TargetBootstrapServer: "my-kafka-service:9092",
+					TargetBootstrapServer: proxiedBootstrapServers,
 					MaxBrokers:            3,
 				},
 			}
@@ -103,7 +105,7 @@ var _ = Describe("KroxyliciousProxy controller", func() {
 			}, timeout, interval).Should(BeTrue())
 			// Let's make sure our Schedule string value was properly converted/handled.
 			Expect(createdProxy.Spec.MaxBrokers).Should(Equal(3))
-			Expect(createdProxy.Spec.TargetBootstrapServer).Should(Equal("my-kafka-service:9092"))
+			Expect(createdProxy.Spec.TargetBootstrapServer).Should(Equal(proxiedBootstrapServers))
 
 			By("By creating a new ConfigMap")
 
@@ -119,7 +121,26 @@ var _ = Describe("KroxyliciousProxy controller", func() {
 				return true
 			}, timeout, interval).Should(BeTrue())
 
-			Expect(createdConfigMap.Data).Should(Equal(map[string]string{"hello": "world"}))
+			Expect(createdConfigMap.Data).Should(HaveKey("config.yaml"))
+			config := createdConfigMap.Data["config.yaml"]
+			var kroxyConfig KroxyliciousConfig
+			err := yaml.Unmarshal([]byte(config), &kroxyConfig)
+			Expect(err).Should(BeNil())
+			Expect(kroxyConfig.AdminHttp.Endpoints.Prometheus).Should(Equal(Prometheus{}))
+			Expect(kroxyConfig.Filters).Should(HaveLen(1))
+			Expect(kroxyConfig.Filters[0].Type).Should(Equal("ApiVersions"))
+			Expect(kroxyConfig.Filters[0].Config).Should(BeNil())
+			Expect(kroxyConfig.VirtualClusters).Should(HaveLen(1))
+			Expect(kroxyConfig.VirtualClusters).Should(HaveKey("demo"))
+			demoCluster := kroxyConfig.VirtualClusters["demo"]
+			targetCluster := demoCluster.TargetCluster
+			Expect(targetCluster.LogFrames).Should(BeFalse())
+			Expect(targetCluster.LogNetwork).Should(BeFalse())
+			Expect(targetCluster.BootstrapServers).Should(Equal(proxiedBootstrapServers))
+			Expect(targetCluster.ClusterNetworkAddressConfigProvider.BoostrapAddress).Should(Equal("localhost:9292"))
+			Expect(targetCluster.ClusterNetworkAddressConfigProvider.BrokerAddressPattern).Should(Equal(KroxyliciousProxyName + "-service:$(portNumber)"))
+
+			Expect(createdConfigMap.Data).Should(HaveKey("config.yaml"))
 
 			By("By creating a new Kroxylicious Deployment")
 

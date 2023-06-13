@@ -30,14 +30,55 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/yaml"
 
 	proxyv1alpha1 "github.com/robobario/kroxylicious-operator/api/v1alpha1"
 )
 
 const (
 	// typeAvailable represents the status of the KroxyliciousProxy reconciliation
-	typeAvailable = "Available"
+	typeAvailable              = "Available"
+	kroxyliciousConfigFilename = "config.yaml"
+	kroxyliciousConfigPath     = "/opt/kroxylicious/config/" + kroxyliciousConfigFilename
 )
+
+type ClusterNetworkAddressConfigProvider struct {
+	BoostrapAddress      string `json:"bootstrapAddress"`
+	BrokerAddressPattern string `json:"brokerAddressPattern"`
+}
+
+type TargetCluster struct {
+	BootstrapServers                    string                              `json:"bootstrap_servers"`
+	ClusterNetworkAddressConfigProvider ClusterNetworkAddressConfigProvider `json:"clusterNetworkAddressConfigProvider"`
+	LogNetwork                          bool                                `json:"logNetwork"`
+	LogFrames                           bool                                `json:"logFrames"`
+}
+
+type VirtualCluster struct {
+	TargetCluster TargetCluster `json:"targetCluster"`
+}
+
+type Filter struct {
+	Type   string                 `json:"type"`
+	Config map[string]interface{} `json:"config,omitempty"`
+}
+
+type Prometheus struct {
+}
+
+type Endpoints struct {
+	Prometheus Prometheus `json:"prometheus,omitempty"`
+}
+
+type AdminHttp struct {
+	Endpoints Endpoints `json:"endpoints,omitempty"`
+}
+
+type KroxyliciousConfig struct {
+	AdminHttp       AdminHttp                 `json:"adminHttp,omitempty"`
+	VirtualClusters map[string]VirtualCluster `json:"virtualClusters"`
+	Filters         []Filter                  `json:"filters"`
+}
 
 // KroxyliciousProxyReconciler reconciles a KroxyliciousProxy object
 type KroxyliciousProxyReconciler struct {
@@ -149,12 +190,42 @@ func (r *KroxyliciousProxyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 func (r *KroxyliciousProxyReconciler) configMapForKroxylicious(
 	kroxylicious *proxyv1alpha1.KroxyliciousProxy) (*corev1.ConfigMap, error) {
+	var config = KroxyliciousConfig{
+		AdminHttp: AdminHttp{
+			Endpoints: Endpoints{
+				Prometheus: Prometheus{},
+			},
+		},
+		VirtualClusters: map[string]VirtualCluster{
+			"demo": {
+				TargetCluster: TargetCluster{
+					BootstrapServers: kroxylicious.Spec.TargetBootstrapServer,
+					ClusterNetworkAddressConfigProvider: ClusterNetworkAddressConfigProvider{
+						BoostrapAddress:      "localhost:9292",
+						BrokerAddressPattern: kroxylicious.Name + "-service:$(portNumber)",
+					},
+					LogNetwork: false,
+					LogFrames:  false,
+				},
+			},
+		},
+		Filters: []Filter{
+			{
+				Type: "ApiVersions",
+			},
+		},
+	}
+	marshal, err := yaml.Marshal(config)
+	if err != nil {
+		return nil, err
+	}
 	configmap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      kroxylicious.Name,
 			Namespace: kroxylicious.Namespace,
 		},
-		Data: map[string]string{"hello": "world"},
+		//charsets in golang?
+		Data: map[string]string{kroxyliciousConfigFilename: string(marshal)},
 	}
 	return configmap, nil
 }
@@ -190,13 +261,13 @@ func (r *KroxyliciousProxyReconciler) deploymentForKroxylicious(
 						{
 							Name:  "kroxylicious",
 							Image: "quay.io/kroxylicious/kroxylicious-development:0.3.0-SNAPSHOT",
-							Args:  []string{"--config", "/opt/kroxylicious/config/config.yaml"},
+							Args:  []string{"--config", kroxyliciousConfigPath},
 							Ports: ports,
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      configVolume,
-									MountPath: "/opt/kroxylicious/config/config.yaml",
-									SubPath:   "config.yaml",
+									MountPath: kroxyliciousConfigPath,
+									SubPath:   kroxyliciousConfigFilename,
 								},
 							},
 						},
