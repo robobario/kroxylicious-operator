@@ -15,16 +15,13 @@ limitations under the License.
 
 /*
 Ideally, we should have one `<kind>_controller_test.go` for each controller scaffolded and called in the `suite_test.go`.
-So, let's write our example test for the CronJob controller (`cronjob_controller_test.go.`)
-*/
-
-/*
-As usual, we start with the necessary imports. We also define some utility variables.
 */
 package controllers
 
 import (
 	"context"
+	"fmt"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -40,14 +37,6 @@ import (
 
 // +kubebuilder:docs-gen:collapse=Imports
 
-/*
-The first step to writing a simple integration test is to actually create an instance of CronJob you can run tests against.
-Note that to create a CronJob, you’ll need to create a stub CronJob struct that contains your CronJob’s specifications.
-
-Note that when we create a stub CronJob, the CronJob also needs stubs of its required downstream objects.
-Without the stubbed Job template spec and the Pod template spec below, the Kubernetes API will not be able to
-create the CronJob.
-*/
 var _ = Describe("KroxyliciousProxy controller", func() {
 
 	// Define utility constants for object names and testing timeouts/durations and intervals.
@@ -56,7 +45,6 @@ var _ = Describe("KroxyliciousProxy controller", func() {
 		KroxyliciousProxyNamespace = "default"
 
 		timeout  = time.Second * 10
-		duration = time.Second * 10
 		interval = time.Millisecond * 250
 	)
 
@@ -65,7 +53,7 @@ var _ = Describe("KroxyliciousProxy controller", func() {
 			By("By accepting a new KroxyliciousProxy")
 			ctx := context.Background()
 			const proxiedBootstrapServers = "my-kafka-service:9092"
-			cronJob := &kroxyliciousv1.KroxyliciousProxy{
+			kroxyliciousProxy := &kroxyliciousv1.KroxyliciousProxy{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: "proxy.kroxylicious.io/v1alpha1",
 					Kind:       "KroxyliciousProxy",
@@ -79,23 +67,11 @@ var _ = Describe("KroxyliciousProxy controller", func() {
 					MaxBrokers:            3,
 				},
 			}
-			Expect(k8sClient.Create(ctx, cronJob)).Should(Succeed())
-
-			/*
-				After creating this CronJob, let's check that the CronJob's Spec fields match what we passed in.
-				Note that, because the k8s apiserver may not have finished creating a CronJob after our `Create()` call from earlier, we will use Gomega’s Eventually() testing function instead of Expect() to give the apiserver an opportunity to finish creating our CronJob.
-
-				`Eventually()` will repeatedly run the function provided as an argument every interval seconds until
-				(a) the function’s output matches what’s expected in the subsequent `Should()` call, or
-				(b) the number of attempts * interval period exceed the provided timeout value.
-
-				In the examples below, timeout and interval are Go Duration values of our choosing.
-			*/
+			Expect(k8sClient.Create(ctx, kroxyliciousProxy)).Should(Succeed())
 
 			proxyLookupKey := types.NamespacedName{Name: KroxyliciousProxyName, Namespace: KroxyliciousProxyNamespace}
 			createdProxy := &kroxyliciousv1.KroxyliciousProxy{}
 
-			// We'll need to retry getting this newly created CronJob, given that creation may not immediately happen.
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, proxyLookupKey, createdProxy)
 				if err != nil {
@@ -112,7 +88,6 @@ var _ = Describe("KroxyliciousProxy controller", func() {
 			configMapLookupKey := types.NamespacedName{Name: KroxyliciousProxyName, Namespace: KroxyliciousProxyNamespace}
 			createdConfigMap := &corev1.ConfigMap{}
 
-			// We'll need to retry getting this newly created CronJob, given that creation may not immediately happen.
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, configMapLookupKey, createdConfigMap)
 				if err != nil {
@@ -147,7 +122,6 @@ var _ = Describe("KroxyliciousProxy controller", func() {
 			deploymentLookupKey := types.NamespacedName{Name: KroxyliciousProxyName, Namespace: KroxyliciousProxyNamespace}
 			createdDeployment := &appsv1.Deployment{}
 
-			// We'll need to retry getting this newly created CronJob, given that creation may not immediately happen.
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, deploymentLookupKey, createdDeployment)
 				if err != nil {
@@ -187,10 +161,36 @@ var _ = Describe("KroxyliciousProxy controller", func() {
 			volume := template.Spec.Volumes[0]
 			Expect(volume.Name).Should(Equal("config-volume"))
 			Expect(volume.ConfigMap.Name).Should(Equal(KroxyliciousProxyName))
+
+			By("By creating a new Service")
+			serviceLookupKey := types.NamespacedName{Name: KroxyliciousProxyName, Namespace: KroxyliciousProxyNamespace}
+			service := &corev1.Service{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, serviceLookupKey, service)
+				if err != nil {
+					return false
+				}
+				return true
+			}, timeout, interval).Should(BeTrue())
+			Expect(service.Spec.Selector).Should(Equal(expectedLabels))
+			Expect(service.Spec.Ports).Should(HaveLen(5))
+			expectServicePort(9193, service.Spec.Ports[0])
+			expectServicePort(9292, service.Spec.Ports[1])
+			expectServicePort(9293, service.Spec.Ports[2])
+			expectServicePort(9294, service.Spec.Ports[3])
+			expectServicePort(9295, service.Spec.Ports[4])
 		})
 	})
 
 })
+
+func expectServicePort(expectedPort int, port corev1.ServicePort) {
+	Expect(port.Port).Should(Equal(int32(expectedPort)))
+	Expect(port.Name).Should(Equal("port-" + fmt.Sprint(expectedPort)))
+	Expect(port.Protocol).Should(Equal(corev1.ProtocolTCP))
+	Expect(port.TargetPort).Should(Equal(intstr.FromInt(expectedPort)))
+}
 
 /*
 	After writing all this code, you can run `go test ./...` in your `controllers/` directory again to run your new test!

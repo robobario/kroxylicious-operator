@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -185,6 +186,40 @@ func (r *KroxyliciousProxyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			return ctrl.Result{}, err
 		}
 	}
+
+	foundService := &corev1.Service{}
+	err = r.Get(ctx, types.NamespacedName{Name: kroxyliciousProxy.Name, Namespace: kroxyliciousProxy.Namespace}, foundService)
+	if err != nil && apierrors.IsNotFound(err) {
+		logger.Info("Service not found")
+		service, err := r.serviceForKroxylicious(kroxyliciousProxy)
+		if err != nil {
+			logger.Error(err, "Failed to define new Service resource for KroxyliciousProxy")
+
+			// The following implementation will update the status
+			meta.SetStatusCondition(&kroxyliciousProxy.Status.Conditions, metav1.Condition{Type: typeAvailable,
+				Status: metav1.ConditionFalse, Reason: "Reconciling",
+				Message: fmt.Sprintf("Failed to create Service for the custom resource (%s): (%s)", kroxyliciousProxy.Name, err)})
+
+			if err := r.Status().Update(ctx, kroxyliciousProxy); err != nil {
+				logger.Error(err, "Failed to update Kroxylicious status")
+				return ctrl.Result{}, err
+			}
+
+			return ctrl.Result{}, err
+		}
+
+		logger.Info("Creating a new Service",
+			"Service.Namespace", service.Namespace, "Service.Name", service.Name)
+		if err = r.Create(ctx, service); err != nil {
+			logger.Error(err, "Failed to create new Service",
+				"Service.Namespace", service.Namespace, "Service.Name", service.Name)
+			return ctrl.Result{}, err
+		} else if err != nil {
+			logger.Error(err, "Failed to create Service")
+			// Let's return the error for the reconciliation be re-trigged again
+			return ctrl.Result{}, err
+		}
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -289,6 +324,34 @@ func (r *KroxyliciousProxyReconciler) deploymentForKroxylicious(
 		},
 	}
 	return deployment, nil
+}
+
+func (r *KroxyliciousProxyReconciler) serviceForKroxylicious(
+	kroxylicious *proxyv1alpha1.KroxyliciousProxy) (*corev1.Service, error) {
+	labels := map[string]string{"app": "kroxylicious"}
+	var ports []corev1.ServicePort
+	ports = append(ports, servicePort(9193))
+	var startPort int32 = 9292
+
+	for i := 0; i <= kroxylicious.Spec.MaxBrokers; i++ {
+		ports = append(ports, servicePort(startPort+int32(i)))
+	}
+
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      kroxylicious.Name,
+			Namespace: kroxylicious.Namespace,
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: labels,
+			Ports:    ports,
+		},
+	}
+	return service, nil
+}
+
+func servicePort(port int32) corev1.ServicePort {
+	return corev1.ServicePort{Port: port, TargetPort: intstr.FromInt(int(port)), Name: "port-" + fmt.Sprint(port), Protocol: corev1.ProtocolTCP}
 }
 
 // SetupWithManager sets up the controller with the Manager.
