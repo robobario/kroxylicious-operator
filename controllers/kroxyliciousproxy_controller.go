@@ -49,14 +49,14 @@ type ClusterNetworkAddressConfigProvider struct {
 }
 
 type TargetCluster struct {
-	BootstrapServers                    string                              `json:"bootstrap_servers"`
-	ClusterNetworkAddressConfigProvider ClusterNetworkAddressConfigProvider `json:"clusterNetworkAddressConfigProvider"`
-	LogNetwork                          bool                                `json:"logNetwork"`
-	LogFrames                           bool                                `json:"logFrames"`
+	BootstrapServers string `json:"bootstrap_servers"`
 }
 
 type VirtualCluster struct {
-	TargetCluster TargetCluster `json:"targetCluster"`
+	TargetCluster                       TargetCluster                       `json:"targetCluster"`
+	ClusterNetworkAddressConfigProvider ClusterNetworkAddressConfigProvider `json:"clusterNetworkAddressConfigProvider"`
+	LogNetwork                          bool                                `json:"logNetwork"`
+	LogFrames                           bool                                `json:"logFrames"`
 }
 
 type Filter struct {
@@ -90,6 +90,9 @@ type KroxyliciousProxyReconciler struct {
 //+kubebuilder:rbac:groups=proxy.kroxylicious.io,resources=kroxyliciousproxies,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=proxy.kroxylicious.io,resources=kroxyliciousproxies/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=proxy.kroxylicious.io,resources=kroxyliciousproxies/finalizers,verbs=update
+//+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -235,13 +238,13 @@ func (r *KroxyliciousProxyReconciler) configMapForKroxylicious(
 			"demo": {
 				TargetCluster: TargetCluster{
 					BootstrapServers: kroxylicious.Spec.TargetBootstrapServer,
-					ClusterNetworkAddressConfigProvider: ClusterNetworkAddressConfigProvider{
-						BoostrapAddress:      "localhost:9292",
-						BrokerAddressPattern: kroxylicious.Name + "-service:$(portNumber)",
-					},
-					LogNetwork: false,
-					LogFrames:  false,
 				},
+				ClusterNetworkAddressConfigProvider: ClusterNetworkAddressConfigProvider{
+					BoostrapAddress:      "localhost:9292",
+					BrokerAddressPattern: kroxylicious.Name + "-service:$(portNumber)",
+				},
+				LogNetwork: false,
+				LogFrames:  false,
 			},
 		},
 		Filters: []Filter{
@@ -295,7 +298,7 @@ func (r *KroxyliciousProxyReconciler) deploymentForKroxylicious(
 					Containers: []corev1.Container{
 						{
 							Name:  "kroxylicious",
-							Image: "quay.io/kroxylicious/kroxylicious-development:0.3.0-SNAPSHOT",
+							Image: "quay.io/kroxylicious/kroxylicious-developer:0.3.0-SNAPSHOT",
 							Args:  []string{"--config", kroxyliciousConfigPath},
 							Ports: ports,
 							VolumeMounts: []corev1.VolumeMount{

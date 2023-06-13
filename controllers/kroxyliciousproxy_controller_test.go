@@ -109,11 +109,11 @@ var _ = Describe("KroxyliciousProxy controller", func() {
 			Expect(kroxyConfig.VirtualClusters).Should(HaveKey("demo"))
 			demoCluster := kroxyConfig.VirtualClusters["demo"]
 			targetCluster := demoCluster.TargetCluster
-			Expect(targetCluster.LogFrames).Should(BeFalse())
-			Expect(targetCluster.LogNetwork).Should(BeFalse())
+			Expect(demoCluster.LogFrames).Should(BeFalse())
+			Expect(demoCluster.LogNetwork).Should(BeFalse())
 			Expect(targetCluster.BootstrapServers).Should(Equal(proxiedBootstrapServers))
-			Expect(targetCluster.ClusterNetworkAddressConfigProvider.BoostrapAddress).Should(Equal("localhost:9292"))
-			Expect(targetCluster.ClusterNetworkAddressConfigProvider.BrokerAddressPattern).Should(Equal(KroxyliciousProxyName + "-service:$(portNumber)"))
+			Expect(demoCluster.ClusterNetworkAddressConfigProvider.BoostrapAddress).Should(Equal("localhost:9292"))
+			Expect(demoCluster.ClusterNetworkAddressConfigProvider.BrokerAddressPattern).Should(Equal(KroxyliciousProxyName + "-service:$(portNumber)"))
 
 			Expect(createdConfigMap.Data).Should(HaveKey("config.yaml"))
 
@@ -143,7 +143,7 @@ var _ = Describe("KroxyliciousProxy controller", func() {
 			Expect(template.Spec.Containers).Should(HaveLen(1))
 			container := template.Spec.Containers[0]
 			Expect(container.Name).Should(Equal("kroxylicious"))
-			Expect(container.Image).Should(Equal("quay.io/kroxylicious/kroxylicious-development:0.3.0-SNAPSHOT"))
+			Expect(container.Image).Should(Equal("quay.io/kroxylicious/kroxylicious-developer:0.3.0-SNAPSHOT"))
 			Expect(container.Args).Should(Equal([]string{"--config", "/opt/kroxylicious/config/config.yaml"}))
 			Expect(container.Ports).Should(HaveLen(5))
 			Expect(container.Ports[0].ContainerPort).Should(Equal(int32(9193)))
